@@ -8,8 +8,6 @@ Spine-csharp is provided as is by Esoteric Software.
 https://fr.esotericsoftware.com/
 https://github.com/EsotericSoftware/spine-runtimes
 
-The Engine.SpineSkiaSharpRenderer need to be repair. Some help would be appreciated to find the right algorithm.
+The Engine.SpineSkiaSharpRenderer contains the magic.
 
 What we have : ![What we have](readme/result.png)
-
-What we should have : ![What we should have](readme/model.png)

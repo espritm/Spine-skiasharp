@@ -1,100 +1,116 @@
 ﻿using Spine;
 using SkiaSharp;
+using BlendMode = Spine.BlendMode;
 
 namespace Spine_skiasharp.Engine
 {
     public class SpineSkiaSharpRenderer
     {
-        private readonly Atlas atlas;
-        private readonly MauiAssetTextureLoader textureLoader;
+        private float[] vertices = new float[1024];
 
         public SpineSkiaSharpRenderer(Atlas atlas, MauiAssetTextureLoader textureLoader)
         {
-            this.textureLoader = textureLoader;
         }
 
         public void DrawSkeleton(SKCanvas canvas, Skeleton skeleton)
         {
+            if (skeleton == null) return;
+
             foreach (Slot slot in skeleton.DrawOrder)
             {
                 Attachment attachment = slot.Attachment;
-                if (attachment is RegionAttachment regionAttachment)
+                if (attachment == null) continue;
+
+                SKBitmap bitmap = null;
+                float[] uvs = null;
+                int[] triangles = null;
+                int verticesCount = 0;
+                float[] worldVertices = null;
+
+                if (attachment is RegionAttachment region)
                 {
-                    DrawRegionAttachment(canvas, regionAttachment, slot);
+                    var atlasRegion = region.Region as AtlasRegion;
+                    if (atlasRegion?.page?.rendererObject is SKBitmap b)
+                        bitmap = b;
+
+                    if (bitmap == null) continue;
+
+                    verticesCount = 4;
+                    if (vertices.Length < 8) Array.Resize(ref vertices, 8);
+                    region.ComputeWorldVertices(slot, vertices, 0, 2);
+                    worldVertices = vertices;
+
+                    uvs = region.UVs;
+                    triangles = new int[] { 0, 1, 2, 2, 3, 0 };
                 }
-                else if (attachment is MeshAttachment meshAttachment)
+                else if (attachment is MeshAttachment mesh)
                 {
-                    DrawMeshAttachment(canvas, meshAttachment, slot);
+                    var atlasRegion = mesh.Region as AtlasRegion;
+                    if (atlasRegion?.page?.rendererObject is SKBitmap b)
+                        bitmap = b;
+
+                    if (bitmap == null) continue;
+
+                    verticesCount = mesh.WorldVerticesLength / 2;
+                    if (vertices.Length < mesh.WorldVerticesLength) Array.Resize(ref vertices, mesh.WorldVerticesLength);
+                    mesh.ComputeWorldVertices(slot, 0, mesh.WorldVerticesLength, vertices, 0, 2);
+                    worldVertices = vertices;
+
+                    uvs = mesh.UVs;
+                    triangles = mesh.Triangles;
+                }
+                else
+                {
+                    continue;
+                }
+
+                if (bitmap != null)
+                {
+                    SKBlendMode blendMode = SKBlendMode.SrcOver;
+                    switch (slot.Data.BlendMode)
+                    {
+                        case BlendMode.Additive: blendMode = SKBlendMode.Plus; break;
+                        case BlendMode.Multiply: blendMode = SKBlendMode.Multiply; break;
+                        case BlendMode.Screen: blendMode = SKBlendMode.Screen; break;
+                        default: blendMode = SKBlendMode.SrcOver; break;
+                    }
+
+                    using (var paint = new SKPaint())
+                    {
+                        paint.IsAntialias = true;
+                        paint.FilterQuality = SKFilterQuality.High;
+                        paint.BlendMode = blendMode;
+
+                        float a = skeleton.A * slot.A * 255;
+                        float r = skeleton.R * slot.R * 255;
+                        float g = skeleton.G * slot.G * 255;
+                        float b = skeleton.B * slot.B * 255;
+
+                        paint.ColorFilter = SKColorFilter.CreateBlendMode(
+                            new SKColor((byte)r, (byte)g, (byte)b, (byte)a), 
+                            SKBlendMode.Modulate);
+
+
+                        SKPoint[] skVertices = new SKPoint[verticesCount];
+                        SKPoint[] skTexs = new SKPoint[verticesCount];
+
+                        for (int i = 0; i < verticesCount; i++)
+                        {
+                            skVertices[i] = new SKPoint(worldVertices[i * 2], worldVertices[i * 2 + 1]);
+                            skTexs[i] = new SKPoint(uvs[i * 2] * bitmap.Width, uvs[i * 2 + 1] * bitmap.Height);
+                        }
+
+                        ushort[] indices = new ushort[triangles.Length];
+                        for (int i = 0; i < triangles.Length; i++) indices[i] = (ushort)triangles[i];
+
+                        using (var shader = SKShader.CreateBitmap(bitmap, SKShaderTileMode.Clamp, SKShaderTileMode.Clamp))
+                        {
+                            paint.Shader = shader;
+                            canvas.DrawVertices(SKVertexMode.Triangles, skVertices, skTexs, null, blendMode, indices, paint);
+                        }
+                    }
                 }
             }
-        }
-
-        private void DrawRegionAttachment(SKCanvas canvas, RegionAttachment regionAttachment, Slot slot)
-        {
-            Bone bone = slot.Bone;
-
-            // Calculate position and cumulated rotation
-            float worldX = bone.WorldX;
-            float worldY = bone.WorldY;
-            float rotation = bone.WorldRotationX + regionAttachment.Rotation;
-            float scaleX = bone.WorldScaleX * regionAttachment.ScaleX;
-            float scaleY = bone.WorldScaleY * regionAttachment.ScaleY;
-
-            // Convert rotation to rad
-            float radians = rotation * MathF.PI / 180f;
-            float cos = MathF.Cos(radians);
-            float sin = MathF.Sin(radians);
-
-            // Calculate world verticies
-            float offsetX = regionAttachment.X;
-            float offsetY = regionAttachment.Y;
-            float renderX = worldX + (offsetX * cos - offsetY * sin);
-            float renderY = worldY - (offsetX * sin - offsetY * cos); // Should inverse Y axis for Skiasharp
-
-            // Retrieve the texture from the texture loader
-            string textureName = "spineboy-ess.png";
-            var bitmap = textureLoader.GetTexture(textureName);
-            if (bitmap == null)
-            {
-                Console.WriteLine($"Texture missing for attachment: {regionAttachment.Name}");
-                return;
-            }
-
-            // Get the region attachment texture coordinates
-            float textureWidth = bitmap.Width;
-            float textureHeight = bitmap.Height;
-            var sourceRect = new SKRect(
-                regionAttachment.Region.u * textureWidth,
-                regionAttachment.Region.v * textureHeight,
-                regionAttachment.Region.u2 * textureWidth,
-                regionAttachment.Region.v2 * textureHeight
-            );
-
-            // Calculate the attachment width and height
-            float attachmentWidth = regionAttachment.Width * scaleX;
-            float attachmentHeight = regionAttachment.Height * scaleY;
-
-            // Define the destination rectangle
-            var destRect = new SKRect(
-                renderX - attachmentWidth / 2,
-                renderY - attachmentHeight / 2,
-                renderX + attachmentWidth / 2,
-                renderY + attachmentHeight / 2
-            );
-
-            // Render texture on SKiasharp canvas
-            using var paint = new SKPaint
-            {
-                IsAntialias = true,
-                FilterQuality = SKFilterQuality.High
-            };
-            canvas.DrawBitmap(bitmap, sourceRect, destRect, paint);
-        }
-
-
-        private void DrawMeshAttachment(SKCanvas canvas, MeshAttachment mesh, Slot slot)
-        {
-            // Todo
         }
     }
 }

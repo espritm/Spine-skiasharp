@@ -45,6 +45,7 @@ namespace Spine_skiasharp
                 var skeletonData = skeletonJson.ReadSkeletonData(new StreamReader(streamSkel));
 
                 skeleton = new Skeleton(skeletonData);
+                skeleton.ScaleY = -1; // Flip Y for Skia rendering convention
 
                 AnimationStateData stateData = new AnimationStateData(skeletonData);
                 stateData.DefaultMix = 0.1f;
@@ -79,8 +80,9 @@ namespace Spine_skiasharp
             animationState.Update(1 / 60f);
             animationState.Apply(skeleton);
             skeleton.UpdateWorldTransform(Skeleton.Physics.Update);
-            skeleton.X = 400;
-            skeleton.Y = 400;
+            skeleton.X = canvas.LocalClipBounds.Width / 2;
+            // Place the character at the bottom of the screen
+            skeleton.Y = canvas.LocalClipBounds.Height;
             renderer.DrawSkeleton(canvas, skeleton);
         }
 
